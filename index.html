@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Model Builder</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        #container { width: 100vw; height: 100vh; }
+        #controlsContainer { 
+            position: absolute; 
+            top: 10px; 
+            left: 10px; 
+            background: #fff; 
+            padding: 10px; 
+            border-radius: 5px; 
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5); 
+            transition: all 0.3s ease;
+            width: 300px;
+            height: auto;
+        }
+        #controlsContainer.minimized { 
+            width: 50px; 
+            height: 50px; 
+            overflow: hidden; 
+            border-radius: 50%; 
+            padding: 0; 
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5); 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            right: 10px;
+            bottom: 10px;
+            top: auto;
+            left: auto;
+        }
+        #controlsContainer.minimized #controls { display: none; }
+        #controlsContainer.minimized #restoreButton { display: block; }
+        #controlsContainer #minimizeButton { 
+            position: absolute; 
+            top: 10px; 
+            right: 10px; 
+            width: 30px; 
+            height: 30px; 
+            background: #f0f0f0; 
+            border: none; 
+            border-radius: 50%; 
+            cursor: pointer; 
+        }
+        #controlsContainer #restoreButton { 
+            display: none; 
+            position: absolute; 
+            bottom: 10px; 
+            right: 10px; 
+            width: 30px; 
+            height: 30px; 
+            background: #f0f0f0; 
+            border: none; 
+            border-radius: 50%; 
+            cursor: pointer; 
+        }
+        #controlsContainer #minimizeButton img,
+        #controlsContainer #restoreButton img {
+            width: 20px; 
+            height: 20px; 
+        }
+        #controlsContainer #codeOutput { 
+            margin-top: 20px; 
+            white-space: pre; 
+            border: 1px solid #ccc; 
+            padding: 10px; 
+            display: none; 
+        }
+        .control-group { margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    <div id="controlsContainer">
+        <button id="minimizeButton" onclick="minimizeControls()">
+            <img src="https://img.icons8.com/ios/50/000000/minus.png" alt="Minimize" />
+        </button>
+        <button id="restoreButton" onclick="restoreControls()">
+            <img src="https://img.icons8.com/ios/50/000000/plus.png" alt="Restore" />
+        </button>
+        <div id="controls">
+            <h2>3D Model Builder</h2>
+            <div class="control-group">
+                <label for="shape">Shape:</label>
+                <select id="shape">
+                    <option value="cube">Cube</option>
+                    <option value="sphere">Sphere</option>
+                    <option value="cylinder">Cylinder</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label for="color">Color:</label>
+                <input type="color" id="color" value="#ff0000">
+            </div>
+            <div class="control-group">
+                <button onclick="addShape()">Add Shape</button>
+                <button onclick="removeShape()">Remove Shape</button>
+                <button onclick="clearAllShapes()">Clear All Shapes</button>
+                <button onclick="generateCode()">Generate C# Code</button>
+                <button onclick="toggleCodeVisibility()">Toggle Code Visibility</button>
+            </div>
+            <div class="control-group">
+                <label for="shapeSelect">Select Shape:</label>
+                <select id="shapeSelect" onchange="selectShape()">
+                    <option value="">-- None --</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Move X:</label>
+                <input type="range" id="moveX" min="-5" max="5" step="0.1" value="0" oninput="moveShape()">
+            </div>
+            <div class="control-group">
+                <label>Move Y:</label>
+                <input type="range" id="moveY" min="-5" max="5" step="0.1" value="0" oninput="moveShape()">
+            </div>
+            <div class="control-group">
+                <label>Move Z:</label>
+                <input type="range" id="moveZ" min="-5" max="5" step="0.1" value="0" oninput="moveShape()">
+            </div>
+            <div class="control-group">
+                <label>Scale X:</label>
+                <input type="range" id="scaleX" min="0.1" max="5" step="0.1" value="1" oninput="scaleShape()">
+            </div>
+            <div class="control-group">
+                <label>Scale Y:</label>
+                <input type="range" id="scaleY" min="0.1" max="5" step="0.1" value="1" oninput="scaleShape()">
+            </div>
+            <div class="control-group">
+                <label>Scale Z:</label>
+                <input type="range" id="scaleZ" min="0.1" max="5" step="0.1" value="1" oninput="scaleShape()">
+            </div>
+            <div id="codeOutput"></div>
+        </div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Setup scene, camera, and renderer
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('container').appendChild(renderer.domElement);
+
+        // Add a basic ambient light
+        const light = new THREE.AmbientLight(0x404040);
+        scene.add(light);
+
+        // Position the camera
+        camera.position.z = 5;
+
+        // Variables for shape management
+        const shapes = [];
+        const shapeDetails = [];
+        let selectedShape = null;
+        let controlsMinimized = false;
+
+        // Function to add a shape to the scene
+        function addShape() {
+            const shapeType = document.getElementById('shape').value;
+            const color = document.getElementById('color').value;
+            let geometry;
+
+            switch (shapeType) {
+                case 'cube':
+                    geometry = new THREE.BoxGeometry(1, 1, 1);
+                    break;
+                case 'sphere':
+                    geometry = new THREE.SphereGeometry(1, 32, 32);
+                    break;
+                case 'cylinder':
+                    geometry = new THREE.CylinderGeometry(1, 1, 2, 32);
+                    break;
+            }
+
+            const material = new THREE.MeshBasicMaterial({ color: color });
+            const shape = new THREE.Mesh(geometry, material);
+            scene.add(shape);
+            shapes.push(shape);
+
+            // Store shape details
+            shapeDetails.push({
+                type: shapeType,
+                color: color,
+                scale: shape.scale.toArray(),
+                position: shape.position.toArray()
+            });
+
+            // Update shape selection dropdown
+            const shapeSelect = document.getElementById('shapeSelect');
+            const option = document.createElement('option');
+            option.value = shapes.length - 1;
+            option.textContent = `Shape ${shapes.length}`;
+            shapeSelect.appendChild(option);
+        }
+
+        // Function to remove the last shape
+        function removeShape() {
+            const shape = shapes.pop();
+            if (shape) {
+                scene.remove(shape);
+                shape.geometry.dispose();
+                shape.material.dispose();
+                shapeDetails.pop();
+
+                // Update shape selection dropdown
+                const shapeSelect = document.getElementById('shapeSelect');
+                shapeSelect.remove(shapeSelect.options.length - 1);
+            }
+        }
+
+        // Function to clear all shapes
+        function clearAllShapes() {
+            shapes.forEach(shape => {
+                scene.remove(shape);
+                shape.geometry.dispose();
+                shape.material.dispose();
+            });
+            shapes.length = 0;
+            shapeDetails.length = 0;
+
+            // Clear shape selection dropdown
+            const shapeSelect = document.getElementById('shapeSelect');
+            shapeSelect.innerHTML = '<option value="">-- None --</option>';
+        }
+
+        // Function to select a shape for transformation
+        function selectShape() {
+            const index = parseInt(document.getElementById('shapeSelect').value);
+            selectedShape = shapes[index] || null;
+
+            if (selectedShape) {
+                document.getElementById('moveX').value = selectedShape.position.x;
+                document.getElementById('moveY').value = selectedShape.position.y;
+                document.getElementById('moveZ').value = selectedShape.position.z;
+                document.getElementById('scaleX').value = selectedShape.scale.x;
+                document.getElementById('scaleY').value = selectedShape.scale.y;
+                document.getElementById('scaleZ').value = selectedShape.scale.z;
+            } else {
+                document.getElementById('moveX').value = 0;
+                document.getElementById('moveY').value = 0;
+                document.getElementById('moveZ').value = 0;
+                document.getElementById('scaleX').value = 1;
+                document.getElementById('scaleY').value = 1;
+                document.getElementById('scaleZ').value = 1;
+            }
+        }
+
+        // Function to move the selected shape
+        function moveShape() {
+            if (selectedShape) {
+                selectedShape.position.set(
+                    parseFloat(document.getElementById('moveX').value),
+                    parseFloat(document.getElementById('moveY').value),
+                    parseFloat(document.getElementById('moveZ').value)
+                );
+                shapeDetails[shapes.indexOf(selectedShape)].position = selectedShape.position.toArray();
+            }
+        }
+
+        // Function to scale the selected shape
+        function scaleShape() {
+            if (selectedShape) {
+                selectedShape.scale.set(
+                    parseFloat(document.getElementById('scaleX').value),
+                    parseFloat(document.getElementById('scaleY').value),
+                    parseFloat(document.getElementById('scaleZ').value)
+                );
+                shapeDetails[shapes.indexOf(selectedShape)].scale = selectedShape.scale.toArray();
+            }
+        }
+
+        // Function to generate C# code
+        function generateCode() {
+            let code = `using UnityEngine;\n\npublic class ShapeCreator : MonoBehaviour\n{\n    void Start()\n    {\n`;
+
+            shapeDetails.forEach((shape, index) => {
+                let shapeCode = `        // Shape ${index + 1}\n`;
+                let primitiveType;
+
+                switch (shape.type) {
+                    case 'cube':
+                        primitiveType = 'Cube';
+                        break;
+                    case 'sphere':
+                        primitiveType = 'Sphere';
+                        break;
+                    case 'cylinder':
+                        primitiveType = 'Cylinder';
+                        break;
+                }
+
+                shapeCode += `        GameObject shape${index} = GameObject.CreatePrimitive(PrimitiveType.${primitiveType});\n`;
+                shapeCode += `        shape${index}.transform.localScale = new Vector3(${shape.scale[0].toFixed(2)}, ${shape.scale[1].toFixed(2)}, ${shape.scale[2].toFixed(2)});\n`;
+                shapeCode += `        shape${index}.transform.localPosition = new Vector3(${shape.position[0].toFixed(2)}, ${shape.position[1].toFixed(2)}, ${shape.position[2].toFixed(2)});\n`;
+                shapeCode += `        shape${index}.GetComponent<Renderer>().material.color = ColorUtility.TryParseHtmlString("${shape.color}", out Color color) ? color : Color.white;\n`;
+                shapeCode += `\n`;
+
+                code += shapeCode;
+            });
+
+            code += `    }\n}\n`;
+
+            document.getElementById('codeOutput').textContent = code;
+        }
+
+        // Function to toggle code visibility
+        function toggleCodeVisibility() {
+            const codeOutput = document.getElementById('codeOutput');
+            codeOutput.style.display = codeOutput.style.display === 'none' ? 'block' : 'none';
+        }
+
+        // Function to minimize the controls panel
+        function minimizeControls() {
+            document.getElementById('controlsContainer').classList.add('minimized');
+        }
+
+        // Function to restore the controls panel
+        function restoreControls() {
+            document.getElementById('controlsContainer').classList.remove('minimized');
+        }
+
+        // Camera controls with WASD
+        let moveSpeed = 0.1;
+        document.addEventListener('keydown', function(event) {
+            switch (event.key) {
+                case 'w':
+                    camera.position.z -= moveSpeed;
+                    break;
+                case 's':
+                    camera.position.z += moveSpeed;
+                    break;
+                case 'a':
+                    camera.position.x -= moveSpeed;
+                    break;
+                case 'd':
+                    camera.position.x += moveSpeed;
+                    break;
+            }
+        });
+
+        // Render loop
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Handle window resizing
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
